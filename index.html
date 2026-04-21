@@ -1,0 +1,1443 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>부가세 자동 계산기</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/exceljs@4.3.0/dist/exceljs.min.js"></script>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: 'Pretendard', 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif;
+  background: #f0f2f7;
+  color: #1a1a2e;
+  min-height: 100vh;
+}
+.container { max-width: 980px; margin: 0 auto; padding: 32px 20px 80px; }
+
+.header { margin-bottom: 28px; }
+.header h1 { font-size: 26px; font-weight: 700; margin-bottom: 6px; }
+.header p { font-size: 14px; color: #666; }
+
+.card {
+  background: #fff;
+  border-radius: 14px;
+  padding: 24px;
+  margin-bottom: 18px;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.07);
+}
+.card-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #1a1a2e;
+  margin-bottom: 18px;
+  padding-bottom: 10px;
+  border-bottom: 2px solid #f0f2f7;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.step-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px; height: 24px;
+  background: #4f46e5;
+  color: white;
+  border-radius: 50%;
+  font-size: 12px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.form-row { display: flex; gap: 16px; flex-wrap: wrap; align-items: flex-end; }
+.form-group { display: flex; flex-direction: column; gap: 5px; }
+.form-group label { font-size: 12px; font-weight: 600; color: #555; }
+select, input[type="number"], input[type="text"] {
+  padding: 9px 12px;
+  border: 1.5px solid #e0e3eb;
+  border-radius: 8px;
+  font-size: 14px;
+  background: #fafbff;
+  transition: border-color 0.15s;
+}
+select:focus, input:focus { outline: none; border-color: #4f46e5; background: #fff; }
+select { cursor: pointer; }
+.hint-text { font-size: 11px; color: #999; margin-top: 3px; line-height: 1.5; }
+
+/* Exchange Rate Grid */
+.exrate-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-top: 14px;
+}
+.exrate-item { display: flex; flex-direction: column; gap: 5px; }
+.exrate-item label { font-size: 12px; font-weight: 600; color: #555; }
+.exrate-item input { width: 100%; }
+.exrate-note {
+  font-size: 11px;
+  color: #999;
+  margin-top: 8px;
+  padding: 8px 10px;
+  background: #f8f9ff;
+  border-radius: 6px;
+  line-height: 1.6;
+}
+
+/* Upload Grid */
+.upload-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+@media (max-width: 660px) { .upload-grid { grid-template-columns: 1fr; } }
+
+.upload-card {
+  border: 2px dashed #dde1ee;
+  border-radius: 10px;
+  padding: 16px;
+  transition: border-color 0.2s, background 0.2s;
+  background: #fafbff;
+  min-width: 0;
+  overflow: hidden;
+}
+.upload-card.ok      { border-style: solid; border-color: #22c55e; background: #f0fdf4; }
+.upload-card.err     { border-style: solid; border-color: #ef4444; background: #fff5f5; }
+.upload-card.partial { border-style: solid; border-color: #f59e0b; background: #fffbeb; }
+.upload-card.drag-over {
+  border-style: solid;
+  border-color: #4f46e5;
+  background: #eef2ff;
+  transform: scale(1.01);
+}
+
+.upload-card h3 { font-size: 13px; font-weight: 700; margin-bottom: 3px; }
+.upload-card .file-hint { font-size: 11px; color: #888; margin-bottom: 10px; line-height: 1.5; }
+
+/* Custom file upload button */
+.file-upload-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 7px 14px;
+  background: #eff1ff;
+  color: #4f46e5;
+  border-radius: 7px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s;
+  border: 1.5px solid #c7d2fe;
+  user-select: none;
+}
+.file-upload-btn:hover { background: #e0e4ff; }
+.file-upload-btn input[type="file"] { display: none; }
+
+.drop-hint {
+  margin-top: 6px;
+  font-size: 11px;
+  color: #aaa;
+  text-align: center;
+  pointer-events: none;
+}
+.upload-card.drag-over .drop-hint { color: #4f46e5; font-weight: 600; }
+
+/* File list */
+.file-list { margin-top: 8px; display: flex; flex-direction: column; gap: 5px; }
+
+/* 파일 아이템: 2줄 구조로 overflow 방지 */
+.file-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 7px 9px;
+  border-radius: 7px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  min-width: 0;
+  overflow: hidden;
+}
+.file-item-row1 {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+.file-item-row2 {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding-left: 2px;
+}
+.fname {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: #555;
+}
+.famount {
+  font-size: 12px;
+  font-weight: 700;
+  font-family: 'Courier New', monospace;
+  color: #15803d;
+}
+.fbadge {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: #dcfce7;
+  color: #166534;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.file-item.err-item .famount { color: #dc2626; }
+.file-item.err-item .fbadge  { background: #fee2e2; color: #991b1b; }
+.fdel {
+  cursor: pointer;
+  color: #d1d5db;
+  font-size: 13px;
+  line-height: 1;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+.fdel:hover { color: #ef4444; }
+
+.upload-total {
+  margin-top: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: #eff1ff;
+  color: #3730a3;
+  text-align: right;
+}
+
+/* Buttons */
+.btn {
+  padding: 11px 28px;
+  border: none;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.btn-primary { background: #4f46e5; color: #fff; }
+.btn-primary:hover { background: #4338ca; transform: translateY(-1px); box-shadow: 0 4px 12px rgba(79,70,229,0.3); }
+.btn-green { background: #22c55e; color: #fff; }
+.btn-green:hover { background: #16a34a; transform: translateY(-1px); box-shadow: 0 4px 12px rgba(34,197,94,0.3); }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none !important; box-shadow: none !important; }
+
+.calc-bar { text-align: center; padding: 4px 0 8px; }
+
+/* Results */
+.results-hidden { display: none; }
+
+.results-table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 4px; }
+.results-table th {
+  background: #f5f7ff;
+  padding: 10px 14px;
+  text-align: left;
+  font-size: 12px;
+  font-weight: 700;
+  color: #444;
+  border-bottom: 2px solid #e5e7eb;
+}
+.results-table th.right, .results-table td.right { text-align: right; }
+.results-table td { padding: 9px 14px; border-bottom: 1px solid #f3f4f6; font-size: 13px; }
+.results-table tr:last-child td { border-bottom: none; }
+.results-table .row-section td {
+  background: #eff1ff;
+  font-weight: 700;
+  font-size: 12px;
+  color: #4f46e5;
+  padding: 7px 14px;
+}
+.results-table .row-total td {
+  background: #fffbeb;
+  font-weight: 700;
+  border-top: 2px solid #fcd34d;
+  font-size: 14px;
+}
+.num { font-family: 'Courier New', monospace; }
+.action-bar { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <div class="header">
+    <h1>📊 부가세 자동 계산기</h1>
+    <p>구글 플레이 · 애플 앱스토어 · 토스페이먼츠 — 분기별 파일을 한 번에 업로드하면 자동으로 합산합니다.</p>
+  </div>
+
+  <!-- STEP 1: 기본 정보 -->
+  <div class="card">
+    <div class="card-title"><span class="step-badge">1</span> 기본 정보</div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>회사명</label>
+        <input type="text" id="companyName" value="트리플콤마 주식회사" style="min-width:180px;">
+      </div>
+      <div class="form-group">
+        <label>신고 년도</label>
+        <select id="selYear"></select>
+      </div>
+      <div class="form-group">
+        <label>분기</label>
+        <select id="selQuarter">
+          <option value="1">1분기 (1~3월)</option>
+          <option value="2">2분기 (4~6월)</option>
+          <option value="3">3분기 (7~9월)</option>
+          <option value="4">4분기 (10~12월)</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- 월별 환율 -->
+    <div style="margin-top:18px;">
+      <div style="display:flex; align-items:center; gap:10px; margin-bottom:4px;">
+        <span style="font-size:12px; font-weight:700; color:#555;">하나은행 월평균 환율 (USD → KRW) — 애플 국외매출 환산용</span>
+        <a href="https://www.kebhana.com/cont/mall/mall15/mall1502/index.jsp" target="_blank"
+           style="font-size:11px; color:#4f46e5; font-weight:600; text-decoration:none; padding:3px 9px; background:#eff1ff; border-radius:5px; border:1px solid #c7d2fe; white-space:nowrap;">
+          🔗 하나은행 환율 바로가기
+        </a>
+      </div>
+      <div class="exrate-grid" id="exrateGrid"></div>
+      <div class="exrate-note">
+        📌 하나은행 환율 → <strong>평균환율</strong> 탭 → <strong>월평균</strong> → 날짜 입력 → 조회 → <strong>USD 매매기준율</strong> 입력<br>
+        애플 국외 파일을 여러 개 올리면 <strong>업로드 순서대로</strong> 월별 환율이 순차 적용됩니다 (1번째 파일 → 1번째 월 환율)
+      </div>
+    </div>
+  </div>
+
+  <!-- STEP 2: 파일 업로드 -->
+  <div class="card">
+    <div class="card-title"><span class="step-badge">2</span> 파일 업로드 <span style="font-size:12px; font-weight:400; color:#888; margin-left:4px;">— 각 항목에 여러 파일 동시 선택 가능</span></div>
+    <div class="upload-grid">
+
+      <!-- 구글 -->
+      <div class="upload-card" id="card-google" ondragover="onDragOver(event,this)" ondragleave="onDragLeave(this)" ondrop="onDrop(event,'google')"
+        <h3>📊 구글 플레이 수익보고서</h3>
+        <div class="file-hint">
+          경로: 보고서 → 재무 → 수익보고서 → 월별<br>
+          파일명: playapps_YYYYMM_*.csv<br>
+          <strong>국내(KR) / 국외 자동 분류 · 분기 3개 파일 선택 가능</strong>
+        </div>
+        <label class="file-upload-btn">
+          📁 파일 선택 (복수)
+          <input type="file" id="file-google" accept=".csv,.xlsx,.xls,.tsv" multiple onchange="handleGoogle(this)">
+        </label>
+        <div class="drop-hint">또는 파일을 여기에 끌어다 놓으세요</div>
+        <div class="file-list" id="list-google"></div>
+        <div id="total-google"></div>
+      </div>
+
+      <!-- 애플 국내 -->
+      <div class="upload-card" id="card-apple-dom" ondragover="onDragOver(event,this)" ondragleave="onDragLeave(this)" ondrop="onDrop(event,'apple-dom')"
+        <h3>🍎 애플 국내 매출</h3>
+        <div class="file-hint">
+          경로: 판매 및 추세 → 매출 → 필터: Store통화(KRW)<br>
+          파일명: 애플X월총매출(26.**).xls<br>
+          <strong>분기 3개 파일 선택 가능</strong>
+        </div>
+        <label class="file-upload-btn">
+          📁 파일 선택 (복수)
+          <input type="file" id="file-apple-dom" accept=".csv,.xlsx,.xls,.tsv,.txt" multiple onchange="handleAppleDom(this)">
+        </label>
+        <div class="drop-hint">또는 파일을 여기에 끌어다 놓으세요</div>
+        <div class="file-list" id="list-apple-dom"></div>
+        <div id="total-apple-dom"></div>
+      </div>
+
+      <!-- 애플 국외 -->
+      <div class="upload-card" id="card-apple-for" ondragover="onDragOver(event,this)" ondragleave="onDragLeave(this)" ondrop="onDrop(event,'apple-for')"
+        <h3>🌍 애플 국외 매출</h3>
+        <div class="file-hint">
+          경로: 판매 및 추세 → 매출 → 필터: 국가/지역(한국 제외)<br>
+          파일명: 애플X월국외매출(26.**).xls<br>
+          <strong>업로드 순서대로 월별 환율 적용</strong>
+        </div>
+        <label class="file-upload-btn">
+          📁 파일 선택 (복수)
+          <input type="file" id="file-apple-for" accept=".csv,.xlsx,.xls,.tsv,.txt" multiple onchange="handleAppleFor(this)">
+        </label>
+        <div class="drop-hint">또는 파일을 여기에 끌어다 놓으세요</div>
+        <div class="file-list" id="list-apple-for"></div>
+        <div id="total-apple-for"></div>
+      </div>
+
+      <!-- 토스페이먼츠 -->
+      <div class="upload-card" id="card-toss" ondragover="onDragOver(event,this)" ondragleave="onDragLeave(this)" ondrop="onDrop(event,'toss')"
+        <h3>💙 토스페이먼츠</h3>
+        <div class="file-hint">
+          경로: 부가세신고자료 → 분기 자료 첨부<br>
+          신용·체크카드 합계 + 현금영수증 자동발행 합계 + 기타 합계 자동 계산
+        </div>
+        <label class="file-upload-btn">
+          📁 파일 선택 (복수)
+          <input type="file" id="file-toss" accept=".csv,.xlsx,.xls" multiple onchange="handleToss(this)">
+        </label>
+        <div class="drop-hint">또는 파일을 여기에 끌어다 놓으세요</div>
+        <div class="file-list" id="list-toss"></div>
+        <div id="total-toss"></div>
+      </div>
+
+      <!-- 계좌이체 -->
+      <div class="upload-card" id="card-transfer" style="grid-column: 1 / -1;" ondragover="onDragOver(event,this)" ondragleave="onDragLeave(this)" ondrop="onDrop(event,'transfer')">
+        <h3>🏦 계좌이체</h3>
+        <div class="file-hint">
+          계좌이체로 직접 입금받은 월별 매출 파일<br>
+          파일 내 <strong>합계</strong> 셀 값을 자동으로 읽어옵니다 · 분기 3개 파일 선택 가능
+        </div>
+        <label class="file-upload-btn">
+          📁 파일 선택 (복수)
+          <input type="file" id="file-transfer" accept=".csv,.xlsx,.xls,.tsv,.txt" multiple onchange="handleTransfer(this)">
+        </label>
+        <div class="drop-hint">또는 파일을 여기에 끌어다 놓으세요</div>
+        <div class="file-list" id="list-transfer"></div>
+        <div id="total-transfer"></div>
+      </div>
+
+    </div>
+  </div>
+
+  <div class="calc-bar">
+    <button class="btn btn-primary" onclick="calculate()">계산하기 →</button>
+  </div>
+
+  <!-- 결과 -->
+  <div id="results-section" class="results-hidden">
+
+    <div class="card">
+      <div class="card-title">
+        <span class="step-badge">3</span> 국외매출정리
+        <span id="label-period" style="font-size:13px; font-weight:500; color:#888; margin-left:4px;"></span>
+      </div>
+      <div id="foreign-table-container" style="overflow-x:auto;"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">
+        <span class="step-badge">4</span> 국내 매출 및 실입금액내역
+        <span style="font-size:13px; font-weight:500; color:#888; margin-left:4px;" id="label-period2"></span>
+      </div>
+      <div id="domestic-table-container" style="overflow-x:auto;"></div>
+    </div>
+
+    <div class="action-bar">
+      <button class="btn btn-green" onclick="exportExcel()">📥 엑셀 파일 저장</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── State ────────────────────────────────────────────────────────────────────
+const S = {
+  // Each entry: { name, dom, for: amount }
+  googleFiles:   [],   // { name, dom, for }
+  appleDomFiles: [],   // { name, total }
+  appleForFiles: [],   // { name, raw, currency }
+  tossFiles:     [],   // { name, card, cash, other }
+  tossCard:      0,
+  tossCash:      0,
+  tossOther:     0,
+  tossTransfer:  0,
+  transferFiles: [],  // { name, total, err }
+  results: null,
+};
+
+// ── Init ─────────────────────────────────────────────────────────────────────
+(function init() {
+  const ySel = document.getElementById('selYear');
+  const now = new Date();
+  for (let y = now.getFullYear(); y >= 2020; y--) ySel.add(new Option(y + '년', y));
+
+  const qSel = document.getElementById('selQuarter');
+  const curQ = Math.ceil((now.getMonth() + 1) / 3);
+  qSel.value = curQ;
+  qSel.addEventListener('change', renderExrateInputs);
+  renderExrateInputs();
+})();
+
+function getQuarterMonths() {
+  const q = parseInt(document.getElementById('selQuarter').value);
+  const base = (q - 1) * 3 + 1;
+  return [base, base + 1, base + 2];
+}
+
+function renderExrateInputs() {
+  const months = getQuarterMonths();
+  document.getElementById('exrateGrid').innerHTML = months.map((m, i) => `
+    <div class="exrate-item">
+      <label>${m}월 환율 (USD/KRW)</label>
+      <input type="number" id="exrate-${i}" placeholder="예: 1,350.50" step="0.01" min="0">
+    </div>
+  `).join('');
+}
+
+function getExrates() {
+  return [0, 1, 2].map(i => {
+    const el = document.getElementById('exrate-' + i);
+    return el ? parseAmt(el.value) : 0;
+  });
+}
+
+// ── Month extractor ───────────────────────────────────────────────────────────
+// 파일명에서 월(1~12) 추출. 우선순위대로 시도.
+function extractMonth(filename) {
+  const s = filename;
+  let m;
+  // "1월", "2월", "12월" — 한국어 패턴 (가장 신뢰도 높음)
+  m = s.match(/[^0-9](\d{1,2})월/);
+  if (!m) m = s.match(/^(\d{1,2})월/);
+  if (m) { const v = parseInt(m[1]); if (v >= 1 && v <= 12) return v; }
+
+  // "202601", "202602" — YYYYMM 6자리
+  m = s.match(/20\d{2}(\d{2})/);
+  if (m) { const v = parseInt(m[1]); if (v >= 1 && v <= 12) return v; }
+
+  // "26.01", "26.02" — YY.MM 패턴
+  m = s.match(/\d{2}\.(\d{2})/);
+  if (m) { const v = parseInt(m[1]); if (v >= 1 && v <= 12) return v; }
+
+  // "(26.**)" — 파일명 끝의 점 뒤 숫자
+  m = s.match(/\(?\d{2}\.(\d{2})\)?/);
+  if (m) { const v = parseInt(m[1]); if (v >= 1 && v <= 12) return v; }
+
+  return null; // 추출 실패
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function fmt(n) {
+  if (n === null || n === undefined) return '-';
+  return Math.round(n).toLocaleString('ko-KR');
+}
+function fmtDec(n, d = 2) {
+  if (!n && n !== 0) return '-';
+  return Number(n).toLocaleString('ko-KR', { minimumFractionDigits: d, maximumFractionDigits: d });
+}
+function parseAmt(v) {
+  if (v === null || v === undefined || v === '') return 0;
+  if (typeof v === 'number') return v;
+  const s = String(v).replace(/[,\s₩$＄￦\u00A0]/g, '');
+  const n = parseFloat(s);
+  return isNaN(n) ? 0 : n;
+}
+function findCol(headers, candidates) {
+  const lower = headers.map(h => String(h || '').toLowerCase().trim());
+  for (const c of candidates) {
+    const idx = lower.findIndex(h => h === c.toLowerCase() || h.includes(c.toLowerCase()));
+    if (idx !== -1) return headers[idx];
+  }
+  return null;
+}
+
+// ── File reader (JSON, header 기반) ──────────────────────────────────────────
+function readFile(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = e => {
+      const buf = e.target.result;
+      try {
+        const wb = XLSX.read(buf, { type: 'array', raw: false });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const data = XLSX.utils.sheet_to_json(ws, { defval: '' });
+        if (data.length) return resolve(data);
+      } catch (_) {}
+      try {
+        const text = new TextDecoder('utf-8').decode(buf);
+        const firstLine = text.split('\n')[0];
+        const isTab = (firstLine.match(/\t/g) || []).length > (firstLine.match(/,/g) || []).length;
+        const wb = XLSX.read(text, { type: 'string', FS: isTab ? '\t' : ',' });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const data = XLSX.utils.sheet_to_json(ws, { defval: '' });
+        if (data.length) return resolve(data);
+      } catch (_) {}
+      reject(new Error('읽기 실패. CSV/Excel 형식인지 확인해주세요.'));
+    };
+    reader.onerror = () => reject(new Error('파일 읽기 오류'));
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+// ── File reader (2D 배열, 헤더 파싱 없음) — Apple 파일 전용 ─────────────────
+function readFile2D(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = e => {
+      const buf = e.target.result;
+      const parse2D = ws => XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' })
+                              .filter(r => r.some(c => c !== '' && c !== null));
+      try {
+        const wb = XLSX.read(buf, { type: 'array', raw: false });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const rows = parse2D(ws);
+        if (rows.length) return resolve(rows);
+      } catch (_) {}
+      try {
+        const text = new TextDecoder('utf-8').decode(buf);
+        const firstLine = text.split('\n')[0];
+        const isTab = (firstLine.match(/\t/g) || []).length > (firstLine.match(/,/g) || []).length;
+        const wb = XLSX.read(text, { type: 'string', FS: isTab ? '\t' : ',' });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const rows = parse2D(ws);
+        if (rows.length) return resolve(rows);
+      } catch (_) {}
+      reject(new Error('읽기 실패. CSV/Excel 형식인지 확인해주세요.'));
+    };
+    reader.onerror = () => reject(new Error('파일 읽기 오류'));
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+// 파일명에서 월을 추출해 뱃지 HTML 반환
+function monthBadge(filename) {
+  const m = extractMonth(filename);
+  return m ? `<span class="fbadge" style="background:#e0f2fe;color:#0369a1">${m}월</span>` : '';
+}
+
+// ── Render file list ───────────────────────────────────────────────────────────
+function renderFileList(listId, items, totalId, cardId, renderItem, calcTotal) {
+  const listEl = document.getElementById(listId);
+  const totalEl = document.getElementById(totalId);
+  const card = document.getElementById(cardId);
+
+  if (!items.length) {
+    listEl.innerHTML = '';
+    totalEl.innerHTML = '';
+    card.className = 'upload-card';
+    return;
+  }
+
+  listEl.innerHTML = items.map((item, i) => renderItem(item, i)).join('');
+  const total = calcTotal(items);
+  totalEl.innerHTML = total !== null
+    ? `<div class="upload-total">분기 합계: ${total}</div>` : '';
+  card.className = 'upload-card ok';
+}
+
+// ── Drag & Drop ───────────────────────────────────────────────────────────────
+function onDragOver(e, el) {
+  e.preventDefault();
+  e.stopPropagation();
+  el.classList.add('drag-over');
+}
+function onDragLeave(el) {
+  el.classList.remove('drag-over');
+}
+function onDrop(e, type) {
+  e.preventDefault();
+  e.stopPropagation();
+  const card = document.getElementById('card-' + type);
+  card.classList.remove('drag-over');
+
+  const files = Array.from(e.dataTransfer.files);
+  if (!files.length) return;
+
+  // 가짜 input 객체를 만들어 기존 핸들러 재사용
+  const fakeInput = { files, value: '' };
+  if (type === 'google')    handleGoogle(fakeInput);
+  if (type === 'apple-dom') handleAppleDom(fakeInput);
+  if (type === 'apple-for') handleAppleFor(fakeInput);
+  if (type === 'toss')      handleToss(fakeInput);
+  if (type === 'transfer')  handleTransfer(fakeInput);
+}
+
+// ── File dedup & delete ───────────────────────────────────────────────────────
+function dedup(newFiles, existing) {
+  const names = new Set(existing.map(f => f.name));
+  return newFiles.filter(f => !names.has(f.name));
+}
+
+function delFile(key, idx) {
+  if (key === 'google')    { S.googleFiles.splice(idx, 1);    renderGoogle();    return; }
+  if (key === 'apple-dom') { S.appleDomFiles.splice(idx, 1);  renderAppleDom();  return; }
+  if (key === 'apple-for') { S.appleForFiles.splice(idx, 1);  renderAppleFor();  return; }
+  if (key === 'toss')      { S.tossFiles.splice(idx, 1);      renderToss();      return; }
+  if (key === 'transfer')  { S.transferFiles.splice(idx, 1);  renderTransfer();  return; }
+}
+
+// ── Google Play ───────────────────────────────────────────────────────────────
+async function handleGoogle(input) {
+  const newFiles = dedup(Array.from(input.files), S.googleFiles);
+  input.value = '';
+  if (!newFiles.length) return;
+
+  document.getElementById('card-google').className = 'upload-card partial';
+
+  for (const file of newFiles) {
+    try {
+      const data = await readFile(file);
+      if (!data.length) throw new Error('데이터 없음');
+      const headers = Object.keys(data[0]);
+      const txCol  = findCol(headers, ['transaction type', 'transaction_type']);
+      const ctCol  = findCol(headers, ['buyer country', 'buyer_country', 'country']);
+      const amtCol = findCol(headers, ['amount (merchant currency)', 'amount_merchant_currency', 'merchant currency', 'merchant amount', 'amount (merchant)']);
+
+      if (!txCol)  throw new Error('"Transaction Type" 컬럼 없음');
+      if (!ctCol)  throw new Error('"Buyer Country" 컬럼 없음');
+      if (!amtCol) throw new Error('"Amount (Merchant Currency)" 컬럼 없음');
+
+      const VALID_TX = ['charge', 'charge refund'];
+      let dom = 0, forAmt = 0;
+      for (const row of data) {
+        const tx  = String(row[txCol] || '').toLowerCase().trim();
+        const ct  = String(row[ctCol] || '').toUpperCase().trim();
+        const amt = parseAmt(row[amtCol]);
+        if (!VALID_TX.includes(tx) || !ct) continue;
+        if (ct === 'KR') dom += amt; else forAmt += amt;
+      }
+      S.googleFiles.push({ name: file.name, dom, for: forAmt, err: null });
+    } catch (e) {
+      S.googleFiles.push({ name: file.name, dom: 0, for: 0, err: e.message });
+    }
+  }
+  renderGoogle();
+}
+function renderGoogle() {
+  renderFileList(
+    'list-google', S.googleFiles, 'total-google', 'card-google',
+    (item, i) => item.err
+      ? `<div class="file-item err-item">
+           <div class="file-item-row1"><span class="fname" title="${item.name}">${item.name}</span><span class="fdel" onclick="delFile('google',${i})">✕</span></div>
+           <div class="file-item-row2"><span class="fbadge">✗ ${item.err}</span></div>
+         </div>`
+      : `<div class="file-item">
+           <div class="file-item-row1"><span class="fname" title="${item.name}">${item.name}</span><span class="fdel" onclick="delFile('google',${i})">✕</span></div>
+           <div class="file-item-row2">${monthBadge(item.name)}<span class="famount">국내 ${fmt(item.dom)} / 국외 ${fmt(item.for)}</span><span class="fbadge">✓</span></div>
+         </div>`,
+    items => {
+      const domSum = items.reduce((s, r) => s + r.dom, 0);
+      const forSum = items.reduce((s, r) => s + r.for, 0);
+      return `국내 ${fmt(domSum)}원 / 국외 ${fmt(forSum)}원`;
+    }
+  );
+}
+
+// ── Apple amount sum (2D 배열 기반) ─────────────────────────────────────────
+// "합계" 셀을 직접 찾아 그 아래 또는 오른쪽 숫자를 반환
+// 헤더 파싱 방식에 의존하지 않아 Apple 날짜범위 리포트 형식에 강건함
+function sumApple2D(rows) {
+  if (!rows.length) throw new Error('데이터 없음');
+
+  // ── 방법 1: "합계" 셀 위치를 탐색 ───────────────────────────────────────
+  for (let r = 0; r < rows.length; r++) {
+    for (let c = 0; c < rows[r].length; c++) {
+      if (String(rows[r][c] || '').trim() !== '합계') continue;
+
+      // Case A: "합계"가 컬럼 헤더 → 바로 아래 행의 같은 열에 숫자
+      if (r + 1 < rows.length) {
+        const v = parseAmt(rows[r + 1][c]);
+        if (v > 0) return { total: v, currency: guessCurrency(rows, c) };
+      }
+      // Case B: "합계"가 행 레이블 → 같은 행에서 오른쪽에 가장 큰 숫자
+      const rowNums = rows[r].slice(c + 1).map(parseAmt).filter(v => v > 0);
+      if (rowNums.length) return { total: Math.max(...rowNums), currency: 'KRW' };
+    }
+  }
+
+  // ── 방법 2: Extended Partner Share / Developer Proceeds 헤더 ─────────────
+  // (rows[0]을 헤더로 해석해 기존 로직과 연결)
+  if (rows.length > 1) {
+    const hdr = rows[0].map(h => String(h || '').toLowerCase().trim());
+    const extIdx  = hdr.findIndex(h => h.includes('extended partner share'));
+    const unitIdx = hdr.findIndex(h => h === 'units' || h === 'quantity');
+    const procIdx = hdr.findIndex(h => h.includes('developer proceeds') || h.includes('partner share'));
+    const data    = rows.slice(1);
+
+    if (extIdx  >= 0) return { total: data.reduce((s,r) => s + parseAmt(r[extIdx]),  0), currency: 'KRW' };
+    if (unitIdx >= 0 && procIdx >= 0)
+      return { total: data.reduce((s,r) => s + parseAmt(r[unitIdx]) * parseAmt(r[procIdx]), 0), currency: 'KRW' };
+    if (procIdx >= 0) return { total: data.reduce((s,r) => s + parseAmt(r[procIdx]), 0), currency: 'KRW' };
+  }
+
+  // ── 방법 3: 시트 전체에서 최댓값 ────────────────────────────────────────
+  let maxVal = 0;
+  for (const row of rows) for (const v of row) { const n = parseAmt(v); if (n > maxVal) maxVal = n; }
+  if (maxVal > 0) return { total: maxVal, currency: 'KRW' };
+
+  throw new Error('합계 금액을 찾을 수 없습니다. "합계" 셀이 있는지 확인해주세요.');
+}
+
+function guessCurrency(rows, sumColIdx) {
+  // "합계" 컬럼과 같은 행에서 통화 힌트를 찾음 (없으면 KRW)
+  for (const row of rows) {
+    const v = String(row[sumColIdx] || '');
+    if (/usd/i.test(v)) return 'USD';
+    if (/eur/i.test(v)) return 'EUR';
+  }
+  return 'KRW';
+}
+
+async function handleAppleDom(input) {
+  const newFiles = dedup(Array.from(input.files), S.appleDomFiles);
+  input.value = '';
+  if (!newFiles.length) return;
+
+  document.getElementById('card-apple-dom').className = 'upload-card partial';
+
+  for (const file of newFiles) {
+    try {
+      const rows = await readFile2D(file);
+      const { total } = sumApple2D(rows);
+      S.appleDomFiles.push({ name: file.name, total, err: null });
+    } catch (e) {
+      S.appleDomFiles.push({ name: file.name, total: 0, err: e.message });
+    }
+  }
+  renderAppleDom();
+}
+function renderAppleDom() {
+  renderFileList(
+    'list-apple-dom', S.appleDomFiles, 'total-apple-dom', 'card-apple-dom',
+    (item, i) => item.err
+      ? `<div class="file-item err-item">
+           <div class="file-item-row1"><span class="fname" title="${item.name}">${item.name}</span><span class="fdel" onclick="delFile('apple-dom',${i})">✕</span></div>
+           <div class="file-item-row2"><span class="fbadge">✗ ${item.err}</span></div>
+         </div>`
+      : `<div class="file-item">
+           <div class="file-item-row1"><span class="fname" title="${item.name}">${item.name}</span><span class="fdel" onclick="delFile('apple-dom',${i})">✕</span></div>
+           <div class="file-item-row2">${monthBadge(item.name)}<span class="famount">${fmt(item.total)}원</span><span class="fbadge">✓</span></div>
+         </div>`,
+    items => fmt(items.reduce((s, r) => s + r.total, 0)) + '원'
+  );
+}
+
+async function handleAppleFor(input) {
+  const newFiles = dedup(Array.from(input.files), S.appleForFiles);
+  input.value = '';
+  if (!newFiles.length) return;
+
+  document.getElementById('card-apple-for').className = 'upload-card partial';
+
+  for (const file of newFiles) {
+    try {
+      const rows = await readFile2D(file);
+      const { total, currency } = sumApple2D(rows);
+      S.appleForFiles.push({ name: file.name, raw: total, currency, err: null });
+    } catch (e) {
+      S.appleForFiles.push({ name: file.name, raw: 0, currency: 'USD', err: e.message });
+    }
+  }
+  renderAppleFor();
+}
+function renderAppleFor() {
+  renderFileList(
+    'list-apple-for', S.appleForFiles, 'total-apple-for', 'card-apple-for',
+    (item, i) => item.err
+      ? `<div class="file-item err-item">
+           <div class="file-item-row1"><span class="fname" title="${item.name}">${item.name}</span><span class="fdel" onclick="delFile('apple-for',${i})">✕</span></div>
+           <div class="file-item-row2"><span class="fbadge">✗ ${item.err}</span></div>
+         </div>`
+      : `<div class="file-item">
+           <div class="file-item-row1"><span class="fname" title="${item.name}">${item.name}</span><span class="fdel" onclick="delFile('apple-for',${i})">✕</span></div>
+           <div class="file-item-row2">${monthBadge(item.name)}<span class="famount">${fmtDec(item.raw)} ${item.currency}</span><span class="fbadge">✓</span></div>
+         </div>`,
+    items => fmtDec(items.reduce((s, r) => s + r.raw, 0)) + ' (환율 적용 전)'
+  );
+}
+
+// ── Toss ──────────────────────────────────────────────────────────────────────
+// 파일 구조:
+//   구분 | 결제수단 | 공급가액 | 면세가액 | 부가세 | 과세제외액 | 합계(결제액-취소완료액)
+// "결제수단" 컬럼에서 "*합계" 행을 찾아 "합계" 컬럼 값을 읽는다.
+function parseTossData(data) {
+  if (!data.length) throw new Error('데이터 없음');
+
+  // 헤더가 실제 데이터인 경우를 대비해 결제수단 컬럼을 먼저 탐색
+  const headers = Object.keys(data[0]);
+  let payCol   = findCol(headers, ['결제수단']);
+  let totalCol = findCol(headers, ['합계 (결제액', '합계(결제액', '합계']);
+
+  // 첫 번째 행이 타이틀이라 헤더가 밀린 경우: 첫 번째 행을 skip하고 재시도
+  if ((!payCol || !totalCol) && data.length > 1) {
+    const h2 = Object.keys(data[1]);
+    payCol   = findCol(h2, ['결제수단']);
+    totalCol = findCol(h2, ['합계 (결제액', '합계(결제액', '합계']);
+    if (payCol && totalCol) data = data.slice(1); // 타이틀 행 제거
+  }
+
+  if (!payCol)   throw new Error('"결제수단" 컬럼을 찾을 수 없습니다');
+  if (!totalCol) throw new Error('"합계(결제액-취소완료액)" 컬럼을 찾을 수 없습니다');
+
+  let card = 0, cash = 0, other = 0, transfer = 0, found = false;
+
+  for (const row of data) {
+    const pay = String(row[payCol] || '').replace(/\s/g, ''); // 공백 제거 후 비교
+    if (!pay.includes('합계')) continue;                       // 합계 행만 처리
+
+    const amt = parseAmt(row[totalCol]);
+    if (!amt) continue;
+
+    if (pay.includes('신용') || pay.includes('체크')) {
+      card = amt; found = true;
+    } else if (pay.includes('현금') || pay.includes('영수증')) {
+      cash = amt; found = true;
+    } else if (pay.includes('계좌')) {
+      transfer = amt; found = true;
+    } else if (pay.includes('기타')) {
+      other = amt; found = true;
+    }
+  }
+
+  if (!found) throw new Error(
+    '합계 행을 찾지 못했습니다.\n' +
+    '"결제수단" 컬럼에 "신용·체크카드 합계", "현금영수증 자동발행 합계", "기타 합계" 행이 있어야 합니다.'
+  );
+  return { card, cash, other, transfer };
+}
+
+async function handleToss(input) {
+  const newFiles = dedup(Array.from(input.files), S.tossFiles);
+  input.value = '';
+  if (!newFiles.length) return;
+
+  for (const file of newFiles) {
+    try {
+      const data = await readFile(file);
+      const { card, cash, other, transfer } = parseTossData(data);
+      S.tossFiles.push({ name: file.name, card, cash, other, transfer, err: null });
+    } catch (e) {
+      S.tossFiles.push({ name: file.name, card: 0, cash: 0, other: 0, err: e.message });
+    }
+  }
+  renderToss();
+}
+function renderToss() {
+  // 파일 합산 결과를 state에 직접 반영
+  S.tossCard     = S.tossFiles.reduce((s, r) => s + r.card,     0);
+  S.tossCash     = S.tossFiles.reduce((s, r) => s + r.cash,     0);
+  S.tossOther    = S.tossFiles.reduce((s, r) => s + r.other,    0);
+  S.tossTransfer = S.tossFiles.reduce((s, r) => s + (r.transfer || 0), 0);
+
+  renderFileList(
+    'list-toss', S.tossFiles, 'total-toss', 'card-toss',
+    (item, i) => item.err
+      ? `<div class="file-item err-item">
+           <div class="file-item-row1"><span class="fname" title="${item.name}">${item.name}</span><span class="fdel" onclick="delFile('toss',${i})">✕</span></div>
+           <div class="file-item-row2"><span class="fbadge">✗ ${item.err}</span></div>
+         </div>`
+      : `<div class="file-item">
+           <div class="file-item-row1"><span class="fname" title="${item.name}">${item.name}</span><span class="fdel" onclick="delFile('toss',${i})">✕</span></div>
+           <div class="file-item-row2">${monthBadge(item.name)}<span class="famount">${fmt(item.card + item.cash + item.other + (item.transfer||0))}원</span><span class="fbadge">✓</span></div>
+         </div>`,
+    items => `합계: ${fmt(items.reduce((s,r) => s + r.card + r.cash + r.other + (r.transfer||0), 0))}원`
+  );
+}
+
+
+// ── 계좌이체 파일 파서 ────────────────────────────────────────────────────────
+// 파일 형식: 거래내역조회 (하나은행 등)
+// 헤더 행에서 "입금" / "출금" 컬럼을 찾고:
+//   - 적요에 "환불" 포함 → 출금 금액을 마이너스
+//   - 그 외 → 입금 금액을 더함
+function parseTransferData(rows) {
+  if (!rows.length) throw new Error('데이터 없음');
+
+  // 헤더 행 탐색: "입금" 과 "출금" 이 모두 있는 행
+  let hdrIdx = -1, inCol = -1, outCol = -1, descCol = -1, dateCol = -1;
+  for (let r = 0; r < rows.length; r++) {
+    const cells = rows[r].map(c => String(c || '').trim());
+    const inIdx  = cells.findIndex(c => c === '입금');
+    const outIdx = cells.findIndex(c => c === '출금');
+    if (inIdx >= 0 && outIdx >= 0) {
+      hdrIdx  = r;
+      inCol   = inIdx;
+      outCol  = outIdx;
+      descCol = cells.findIndex(c => c === '적요');
+      dateCol = cells.findIndex(c => c.includes('거래일'));
+      break;
+    }
+  }
+
+  if (hdrIdx < 0) throw new Error('"입금"/"출금" 컬럼을 찾을 수 없습니다');
+
+  // 거래일시에서 월 추출 (첫 번째 유효 행 기준)
+  let detectedMonth = null;
+  function monthFromDate(val) {
+    const s = String(val || '');
+    // "2026-03-04 ..." or "2026.03.04" → 월
+    let m = s.match(/\d{4}[-./](\d{1,2})[-./]\d/);
+    if (m) return parseInt(m[1]);
+    // "3/4/2026" MM/DD/YYYY
+    m = s.match(/^(\d{1,2})\/\d{1,2}\/\d{4}/);
+    if (m) return parseInt(m[1]);
+    return null;
+  }
+
+  let total = 0;
+  for (let r = hdrIdx + 1; r < rows.length; r++) {
+    const row = rows[r];
+    // 합계 행 또는 빈 행 건너뜀
+    if (row.some(c => String(c || '').replace(/\s/g, '').includes('합계'))) continue;
+    if (!row.some(c => c !== '' && c !== null && c !== undefined)) continue;
+
+    // 날짜에서 월 추출 (첫 번째 성공한 행)
+    if (detectedMonth === null && dateCol >= 0) {
+      const mo = monthFromDate(row[dateCol]);
+      if (mo) detectedMonth = mo;
+    }
+
+    const desc   = descCol >= 0 ? String(row[descCol] || '').trim() : '';
+    const inAmt  = parseAmt(row[inCol]  ?? 0);
+    const outAmt = parseAmt(row[outCol] ?? 0);
+
+    if (desc.includes('환불')) {
+      total -= outAmt; // 환불 = 마이너스
+    } else {
+      total += inAmt;  // 일반 입금
+    }
+  }
+
+  return { total, month: detectedMonth };
+}
+
+// ── 계좌이체 ─────────────────────────────────────────────────────────────────
+async function handleTransfer(input) {
+  const newFiles = dedup(Array.from(input.files), S.transferFiles);
+  input.value = '';
+  if (!newFiles.length) return;
+
+  document.getElementById('card-transfer').className = 'upload-card partial';
+
+  for (const file of newFiles) {
+    try {
+      const rows           = await readFile2D(file);
+      const { total, month } = parseTransferData(rows);
+      S.transferFiles.push({ name: file.name, total, month, err: null });
+    } catch (e) {
+      S.transferFiles.push({ name: file.name, total: 0, err: e.message });
+    }
+  }
+  renderTransfer();
+}
+
+function renderTransfer() {
+  renderFileList(
+    'list-transfer', S.transferFiles, 'total-transfer', 'card-transfer',
+    (item, i) => item.err
+      ? `<div class="file-item err-item">
+           <div class="file-item-row1"><span class="fname" title="${item.name}">${item.name}</span><span class="fdel" onclick="delFile('transfer',${i})">✕</span></div>
+           <div class="file-item-row2"><span class="fbadge">✗ ${item.err}</span></div>
+         </div>`
+      : `<div class="file-item">
+           <div class="file-item-row1"><span class="fname" title="${item.name}">${item.name}</span><span class="fdel" onclick="delFile('transfer',${i})">✕</span></div>
+           <div class="file-item-row2">${item.month ? `<span class="fbadge" style="background:#e0f2fe;color:#0369a1">${item.month}월</span>` : monthBadge(item.name)}<span class="famount">${fmt(item.total)}원</span><span class="fbadge">✓</span></div>
+         </div>`,
+    items => fmt(items.reduce((s, r) => s + r.total, 0)) + '원'
+  );
+}
+
+// ── Monthly domestic data builder ────────────────────────────────────────────
+function buildMonthlyDomData(months) {
+  const data = {};
+  months.forEach(m => { data[m] = { google: 0, apple: 0, transfer: 0, toss: 0 }; });
+
+  S.googleFiles.forEach(f => {
+    const m = extractMonth(f.name);
+    if (m !== null && data[m] !== undefined) data[m].google += f.dom;
+  });
+  S.appleDomFiles.forEach(f => {
+    const m = extractMonth(f.name);
+    if (m !== null && data[m] !== undefined) data[m].apple += f.total;
+  });
+  S.tossFiles.forEach(f => {
+    const m = extractMonth(f.name);
+    if (m !== null && data[m] !== undefined) {
+      data[m].toss     += (f.card + f.cash + f.other);
+      data[m].transfer += (f.transfer || 0);
+    }
+  });
+  // 계좌이체: 거래일시 감지 월 → 파일명 월 → 업로드 순서 순으로 배정
+  let unmatched = 0;
+  S.transferFiles.forEach(f => {
+    const m = f.month ?? extractMonth(f.name); // 거래일시에서 감지된 월 우선
+    if (m !== null && data[m] !== undefined) {
+      data[m].transfer += f.total;
+    } else {
+      data[months[unmatched % months.length]].transfer += f.total;
+      unmatched++;
+    }
+  });
+  return data;
+}
+
+// ── Calculate ─────────────────────────────────────────────────────────────────
+function calculate() {
+  const year    = document.getElementById('selYear').value;
+  const quarter = document.getElementById('selQuarter').value;
+  const months  = getQuarterMonths();
+  const exrates = getExrates();
+
+  // Apple foreign — 파일명에서 월 추출 후 해당 월 환율 매칭
+  // exrates[0]=분기1월, exrates[1]=분기2월, exrates[2]=분기3월
+  const appleForRows = S.appleForFiles.map((f, i) => {
+    const fileMonth  = extractMonth(f.name);
+    // 분기 내 인덱스: 파일명에서 월을 찾으면 해당 월로, 못 찾으면 업로드 순서(i) 사용
+    const monthIdx   = (fileMonth && months.includes(fileMonth))
+                       ? months.indexOf(fileMonth)
+                       : i;
+    const exrate     = exrates[monthIdx] || 0;
+    const month      = fileMonth || months[i] || months[months.length - 1];
+    return { name: f.name, raw: f.raw, currency: f.currency, exrate, krw: Math.round(f.raw * exrate), month };
+  });
+
+  // 애플 국외 파일이 있는데 환율이 비어있으면 경고
+  if (S.appleForFiles.length) {
+    const missing = appleForRows.filter(r => !r.exrate).map(r => r.month + '월');
+    if (missing.length) {
+      alert(`애플 국외매출 환율을 입력해주세요.\n미입력: ${[...new Set(missing)].join(', ')}\n\n하나은행 환율 → 평균환율 → 월평균 → USD 매매기준율`);
+      document.getElementById('exrateGrid').scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return;
+    }
+  }
+
+  // Google
+  const googleDomTotal = S.googleFiles.reduce((s, r) => s + r.dom, 0);
+  const googleForTotal = S.googleFiles.reduce((s, r) => s + r.for, 0);
+
+  // Apple domestic
+  const appleDomTotal = S.appleDomFiles.reduce((s, r) => s + r.total, 0);
+  const appleForKRWTotal = appleForRows.reduce((s, r) => s + r.krw, 0);
+
+  // Toss
+  const tossTotal    = S.tossCard + S.tossCash + S.tossOther;
+  const totalForeign = googleForTotal + appleForKRWTotal;
+
+  // Monthly domestic breakdown (for 3-section table)
+  // 계좌이체 파일 월 배정도 여기서 처리됨
+  const monthlyDom    = buildMonthlyDomData(months);
+  const transferTotal = months.reduce((s, m) => s + monthlyDom[m].transfer, 0);
+  const totalDomestic = googleDomTotal + appleDomTotal + tossTotal + transferTotal;
+
+  S.results = {
+    year, quarter, months, exrates,
+    googleDomTotal, googleForTotal,
+    appleDomTotal, appleForRows, appleForKRWTotal,
+    tossCard: S.tossCard, tossCash: S.tossCash, tossOther: S.tossOther, tossTotal,
+    transferTotal, totalForeign, totalDomestic, monthlyDom,
+    companyName: (document.getElementById('companyName').value || '트리플콤마 주식회사').trim(),
+  };
+
+  const periodStr = `${year}년 ${quarter}분기 (${months[0]}~${months[months.length - 1]}월)`;
+  document.getElementById('label-period').textContent  = periodStr;
+  document.getElementById('label-period2').textContent = periodStr;
+
+  // ─ Foreign monthly table ─
+  const mLabels = months.map(m => m + '월');
+
+  // Group Google foreign by month
+  const gForByMon = {};
+  months.forEach(m => { gForByMon[m] = 0; });
+  S.googleFiles.forEach(f => {
+    const m = extractMonth(f.name);
+    if (m !== null && gForByMon[m] !== undefined) gForByMon[m] += f.for;
+  });
+
+  // Group Apple foreign by month
+  const aForByMon = {}, exrateByMon = {}, aRawByMon = {};
+  months.forEach(m => { aForByMon[m] = 0; exrateByMon[m] = 0; aRawByMon[m] = 0; });
+  appleForRows.forEach(af => {
+    const m = af.month;
+    if (months.includes(m)) {
+      aForByMon[m]   += af.krw;
+      exrateByMon[m]  = af.exrate;
+      aRawByMon[m]   += af.raw;
+    }
+  });
+
+  const gForM2   = months.map(m => gForByMon[m]);
+  const aForM2   = months.map(m => aForByMon[m]);
+  const exrateM2 = months.map(m => exrateByMon[m]);
+  const aRawM2   = months.map(m => aRawByMon[m]);
+  const sumForM2 = months.map((_, i) => gForM2[i] + aForM2[i]);
+  const fCols    = months.length + 2;
+
+  const fThCols = ['국외매출', ...mLabels, '합계'].map((h, i) =>
+    `<th${i > 0 ? ' class="right"' : ''} style="white-space:nowrap;min-width:${i===0?'90px':'90px'}">${h}</th>`
+  ).join('');
+
+  function forRow(label, vals, totVal, style = '') {
+    const cells = vals.map(v => `<td class="right num">${fmt(v)}</td>`).join('');
+    const totalCell = totVal !== null
+      ? `<td class="right num" style="font-weight:700">${fmt(totVal)}</td>`
+      : `<td></td>`;
+    return `<tr${style ? ` style="${style}"` : ''}><td>${label}</td>${cells}${totalCell}</tr>`;
+  }
+  function forRowDec(label, vals, style = '') {
+    const cells = vals.map(v => `<td class="right num">${v ? fmtDec(v) : ''}</td>`).join('');
+    return `<tr${style ? ` style="${style}"` : ''}><td>${label}</td>${cells}<td></td></tr>`;
+  }
+
+  let fHtml = `<table class="results-table" style="font-size:12px;min-width:480px;">
+  <thead><tr>${fThCols}</tr></thead><tbody>`;
+  fHtml += forRow('구글', gForM2, googleForTotal);
+  fHtml += forRow('애플', aForM2, appleForKRWTotal);
+  fHtml += forRow('합계', sumForM2, totalForeign, 'background:#f5f7ff;font-weight:700');
+  fHtml += forRowDec('평균환율', exrateM2);
+  fHtml += forRowDec('', aRawM2, 'color:#888;font-size:11px');
+  fHtml += '</tbody></table>';
+
+  document.getElementById('foreign-table-container').innerHTML = fHtml;
+
+  // ─ Domestic 3-section monthly table ─
+  const thCols  = ['구분', ...mLabels, '합계'].map((h, i) =>
+    `<th${i > 0 ? ' class="right"' : ''} style="white-space:nowrap;min-width:${i===0?'90px':'80px'}">${h}</th>`
+  ).join('');
+
+  function domRow(label, vals, totVal, style = '') {
+    const cells = vals.map(v => `<td class="right num">${fmt(v)}</td>`).join('');
+    return `<tr${style ? ` style="${style}"` : ''}><td>${label}</td>${cells}<td class="right num" style="font-weight:700">${fmt(totVal)}</td></tr>`;
+  }
+  function sectionHdr(label, cols) {
+    return `<tr class="row-section"><td colspan="${cols}">${label}</td></tr>`;
+  }
+
+  const cols = months.length + 2; // 구분 + months + 합계
+
+  // monthly values
+  const gMonthly  = months.map(m => monthlyDom[m].google);
+  const aMonthly  = months.map(m => monthlyDom[m].apple);
+  const trMonthly = months.map(m => monthlyDom[m].transfer);
+  const toMonthly = months.map(m => monthlyDom[m].toss);
+
+  // subtotals per month
+  const salesSubtotal = months.map((m, i) => gMonthly[i] + aMonthly[i] + trMonthly[i] + toMonthly[i]);
+  const salesTotal    = googleDomTotal + appleDomTotal + transferTotal + tossTotal;
+
+  // fees = sales * 3/11 (google & apple only)
+  const gFeeMonthly = gMonthly.map(v => Math.round(v * 3 / 11));
+  const aFeeMonthly = aMonthly.map(v => Math.round(v * 3 / 11));
+  const feeSub      = months.map((_, i) => gFeeMonthly[i] + aFeeMonthly[i]);
+  const gFeeTotal   = Math.round(googleDomTotal * 3 / 11);
+  const aFeeTotal   = Math.round(appleDomTotal  * 3 / 11);
+  const feeTotalAll = gFeeTotal + aFeeTotal;
+
+  // net = sales - fee
+  const gNetMonthly = months.map((_, i) => gMonthly[i] - gFeeMonthly[i]);
+  const aNetMonthly = months.map((_, i) => aMonthly[i] - aFeeMonthly[i]);
+  const netSub      = months.map((_, i) => gNetMonthly[i] + aNetMonthly[i] + trMonthly[i] + toMonthly[i]);
+  const gNetTotal   = googleDomTotal - gFeeTotal;
+  const aNetTotal   = appleDomTotal  - aFeeTotal;
+  const netTotal    = gNetTotal + aNetTotal + transferTotal + tossTotal;
+
+  let dHtml = `<table class="results-table" style="font-size:12px;min-width:480px;">
+  <thead><tr>${thCols}</tr></thead><tbody>`;
+
+  // Section 1: 매출
+  dHtml += sectionHdr('*매출', cols);
+  dHtml += domRow('구글',        gMonthly,  googleDomTotal);
+  dHtml += domRow('애플',        aMonthly,  appleDomTotal);
+  dHtml += domRow('계좌이체',    trMonthly, transferTotal);
+  dHtml += domRow('토스페이먼츠', toMonthly, tossTotal);
+  dHtml += domRow('합계', salesSubtotal, salesTotal, 'background:#f5f7ff;font-weight:700');
+
+  // Section 2: 수수료
+  dHtml += sectionHdr('수수료', cols);
+  dHtml += domRow('구글', gFeeMonthly, gFeeTotal);
+  dHtml += domRow('애플', aFeeMonthly, aFeeTotal);
+  dHtml += domRow('합계', feeSub, feeTotalAll, 'background:#f5f7ff;font-weight:700');
+
+  // Section 3: 실입금액
+  dHtml += sectionHdr('실입금액', cols);
+  dHtml += domRow('구글',        gNetMonthly, gNetTotal);
+  dHtml += domRow('애플',        aNetMonthly, aNetTotal);
+  dHtml += domRow('계좌이체',    trMonthly,   transferTotal);
+  dHtml += domRow('토스페이먼츠', toMonthly,  tossTotal);
+  dHtml += domRow('합계', netSub, netTotal, 'background:#fffbeb;font-weight:700;border-top:2px solid #fcd34d');
+
+  dHtml += '</tbody></table>';
+  document.getElementById('domestic-table-container').innerHTML = dHtml;
+
+  const sec = document.getElementById('results-section');
+  sec.className = '';
+  sec.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// ── Export Excel (ExcelJS — styled) ──────────────────────────────────────────
+async function exportExcel() {
+  const r = S.results;
+  if (!r) return;
+
+  const btn = document.querySelector('.btn-green');
+  btn.disabled = true;
+  btn.textContent = '저장 중…';
+
+  try {
+    const wb     = new ExcelJS.Workbook();
+    const months = r.months;
+    const mLabels = months.map(m => m + '월');
+    const NC = 1 + months.length + 1; // label + month cols + 합계
+
+    // ── Common styles ──
+    const thin = { style: 'thin', color: { argb: 'FF999999' } };
+    const bdr  = { top: thin, left: thin, bottom: thin, right: thin };
+    const wonFmt = '#,##0';
+    const decFmt = '#,##0.00';
+
+    const FILLS = {
+      hdr:   { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4472C4' } },
+      sub:   { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD9E1F2' } },
+      total: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF2CC' } },
+      sec:   { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2EFDA' } },
+    };
+
+    // Apply border + alignment + optional fill/bold/numFmt to each cell in row
+    function styleRow(row, opts = {}) {
+      for (let c = 1; c <= NC; c++) {
+        const cell = row.getCell(c);
+        cell.border = bdr;
+        if (opts.fill) cell.fill = opts.fill;
+        if (opts.bold) cell.font = {
+          ...(cell.font || {}), bold: true,
+          ...(opts.color ? { color: { argb: opts.color } } : {}),
+        };
+        cell.alignment = { horizontal: c === 1 ? 'left' : 'right', vertical: 'middle' };
+        if (c > 1 && opts.numFmt) cell.numFmt = opts.numFmt;
+      }
+    }
+
+    // Merged section header row
+    function addSecHdr(ws, label, fill) {
+      const row = ws.addRow([label]);
+      ws.mergeCells(row.number, 1, row.number, NC);
+      const cell = row.getCell(1);
+      cell.fill = fill || FILLS.sec;
+      cell.font = { bold: true };
+      cell.border = bdr;
+      cell.alignment = { horizontal: 'left', vertical: 'middle' };
+      return row;
+    }
+
+    // ── Sheet 1: 국외매출정리 ──
+    const gForByMon = {};
+    months.forEach(m => { gForByMon[m] = 0; });
+    S.googleFiles.forEach(f => {
+      const m = extractMonth(f.name);
+      if (m !== null && gForByMon[m] !== undefined) gForByMon[m] += f.for;
+    });
+    const aForByMon = {}, exrByMon = {}, aRawByMon = {};
+    months.forEach(m => { aForByMon[m] = 0; exrByMon[m] = 0; aRawByMon[m] = 0; });
+    r.appleForRows.forEach(af => {
+      const m = af.month;
+      if (months.includes(m)) {
+        aForByMon[m] += af.krw;
+        exrByMon[m]   = af.exrate;
+        aRawByMon[m] += af.raw;
+      }
+    });
+    const gForM  = months.map(m => gForByMon[m]);
+    const aForM  = months.map(m => aForByMon[m]);
+    const exrM   = months.map(m => exrByMon[m]);
+    const aRawM  = months.map(m => aRawByMon[m]);
+    const sumForM = months.map((_, i) => gForM[i] + aForM[i]);
+
+    // ── Sheet 1: 국내매출및실입금액내역 ──
+    const md   = r.monthlyDom;
+    const gM   = months.map(m => md[m].google);
+    const aM   = months.map(m => md[m].apple);
+    const trM  = months.map(m => md[m].transfer);
+    const toM  = months.map(m => md[m].toss);
+
+    const gFeeM = gM.map(v => Math.round(v * 3 / 11));
+    const aFeeM = aM.map(v => Math.round(v * 3 / 11));
+    const gFeeT = Math.round(r.googleDomTotal * 3 / 11);
+    const aFeeT = Math.round(r.appleDomTotal  * 3 / 11);
+    const gNetM = months.map((_, i) => gM[i] - gFeeM[i]);
+    const aNetM = months.map((_, i) => aM[i] - aFeeM[i]);
+
+    const saleSub  = months.map((_, i) => gM[i] + aM[i] + trM[i] + toM[i]);
+    const saleTotal = r.googleDomTotal + r.appleDomTotal + r.transferTotal + r.tossTotal;
+    const feeSub   = months.map((_, i) => gFeeM[i] + aFeeM[i]);
+    const feeTotal  = gFeeT + aFeeT;
+    const netSub   = months.map((_, i) => gNetM[i] + aNetM[i] + trM[i] + toM[i]);
+    const netTotal  = (r.googleDomTotal - gFeeT) + (r.appleDomTotal - aFeeT) + r.transferTotal + r.tossTotal;
+
+    const ws1 = wb.addWorksheet('국내매출및실입금액내역');
+    ws1.columns = [{ width: 14 }, ...months.map(() => ({ width: 18 })), { width: 18 }];
+
+    // Company name (merged)
+    row = ws1.addRow([r.companyName]);
+    ws1.mergeCells(row.number, 1, row.number, NC);
+    row.getCell(1).font = { bold: true, size: 14 };
+    row.getCell(1).alignment = { horizontal: 'center', vertical: 'middle' };
+    row.height = 28;
+
+    ws1.addRow([]);
+
+    // Header
+    row = ws1.addRow(['', ...mLabels, '합계']);
+    styleRow(row, { fill: FILLS.hdr, bold: true, color: 'FFFFFFFF' });
+
+    // *매출
+    addSecHdr(ws1, '*매출');
+    row = ws1.addRow(['구글',        ...gM,      r.googleDomTotal]); styleRow(row, { numFmt: wonFmt });
+    row = ws1.addRow(['애플',        ...aM,      r.appleDomTotal]);  styleRow(row, { numFmt: wonFmt });
+    row = ws1.addRow(['계좌이체',    ...trM,     r.transferTotal]);  styleRow(row, { numFmt: wonFmt });
+    row = ws1.addRow(['토스페이먼츠', ...toM,    r.tossTotal]);      styleRow(row, { numFmt: wonFmt });
+    row = ws1.addRow(['합계',        ...saleSub, saleTotal]);        styleRow(row, { fill: FILLS.sub, bold: true, numFmt: wonFmt });
+    ws1.addRow([]);
+
+    // 수수료
+    addSecHdr(ws1, '수수료');
+    row = ws1.addRow(['구글', ...gFeeM, gFeeT]);    styleRow(row, { numFmt: wonFmt });
+    row = ws1.addRow(['애플', ...aFeeM, aFeeT]);    styleRow(row, { numFmt: wonFmt });
+    row = ws1.addRow(['합계', ...feeSub, feeTotal]); styleRow(row, { fill: FILLS.sub, bold: true, numFmt: wonFmt });
+    ws1.addRow([]);
+
+    // 실입금액
+    addSecHdr(ws1, '실입금액');
+    row = ws1.addRow(['구글',        ...gNetM, r.googleDomTotal - gFeeT]); styleRow(row, { numFmt: wonFmt });
+    row = ws1.addRow(['애플',        ...aNetM, r.appleDomTotal  - aFeeT]); styleRow(row, { numFmt: wonFmt });
+    row = ws1.addRow(['계좌이체',    ...trM,   r.transferTotal]);           styleRow(row, { numFmt: wonFmt });
+    row = ws1.addRow(['토스페이먼츠', ...toM,  r.tossTotal]);               styleRow(row, { numFmt: wonFmt });
+    row = ws1.addRow(['합계',        ...netSub, netTotal]);                 styleRow(row, { fill: FILLS.total, bold: true, numFmt: wonFmt });
+
+    // ── Sheet 2: 국외매출정리 ──
+    const ws2 = wb.addWorksheet('국외매출정리');
+    ws2.columns = [{ width: 12 }, ...months.map(() => ({ width: 18 })), { width: 18 }];
+
+    row = ws2.addRow(['국외매출', ...mLabels, '합계']);
+    styleRow(row, { fill: FILLS.hdr, bold: true, color: 'FFFFFFFF' });
+    row = ws2.addRow(['구글', ...gForM, r.googleForTotal]);
+    styleRow(row, { numFmt: wonFmt });
+    row = ws2.addRow(['애플', ...aForM, r.appleForKRWTotal]);
+    styleRow(row, { numFmt: wonFmt });
+    row = ws2.addRow(['합계', ...sumForM, r.totalForeign]);
+    styleRow(row, { fill: FILLS.sub, bold: true, numFmt: wonFmt });
+    row = ws2.addRow(['평균환율', ...exrM, null]);
+    styleRow(row, { numFmt: decFmt });
+    row = ws2.addRow(['', ...aRawM, null]);
+    styleRow(row, { numFmt: '#,##0.000000' });
+
+    // ── Download ──
+    const buffer = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buffer], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `부가세_${r.year}년${r.quarter}분기.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+  } catch (e) {
+    alert('엑셀 저장 오류: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '📥 엑셀 파일 저장';
+  }
+}
+</script>
+</body>
+</html>
