@@ -519,6 +519,11 @@ function fmt(n) {
   if (n === null || n === undefined) return '-';
   return Math.round(n).toLocaleString('ko-KR');
 }
+// 계산에는 실제 값(음수 포함)을 그대로 쓰되, 화면 표시만 0으로 보이도록 하는 포맷터
+function fmtNonNeg(n) {
+  if (n === null || n === undefined) return '-';
+  return fmt(Math.max(0, n));
+}
 function fmtDec(n, d = 2) {
   if (!n && n !== 0) return '-';
   return Number(n).toLocaleString('ko-KR', { minimumFractionDigits: d, maximumFractionDigits: d });
@@ -677,26 +682,38 @@ async function handleGoogle(input) {
       const data = await readFile(file);
       if (!data.length) throw new Error('데이터 없음');
       const headers = Object.keys(data[0]);
-      const txCol  = findCol(headers, ['transaction type', 'transaction_type']);
-      const ctCol  = findCol(headers, ['buyer country', 'buyer_country', 'country']);
-      const amtCol = findCol(headers, ['amount (merchant currency)', 'amount_merchant_currency', 'merchant currency', 'merchant amount', 'amount (merchant)']);
+      const txCol   = findCol(headers, ['transaction type', 'transaction_type']);
+      const ctCol   = findCol(headers, ['buyer country', 'buyer_country', 'country']);
+      const amtCol  = findCol(headers, ['amount (merchant currency)', 'amount_merchant_currency', 'merchant currency', 'merchant amount', 'amount (merchant)']);
+      const eligCol = findCol(headers, ['first usd 1m eligible', 'first usd 1,000,000 eligible', '1m eligible']);
 
       if (!txCol)  throw new Error('"Transaction Type" 컬럼 없음');
       if (!ctCol)  throw new Error('"Buyer Country" 컬럼 없음');
       if (!amtCol) throw new Error('"Amount (Merchant Currency)" 컬럼 없음');
 
+      // "First USD 1M Eligible" = Yes → 연간 첫 $1M 구간(수수료 15%), No → 초과 구간(수수료 30%)
       const VALID_TX = ['charge', 'charge refund'];
-      let dom = 0, forAmt = 0;
+      let dom = 0, dom15 = 0, dom30 = 0, forAmt = 0;
       for (const row of data) {
         const tx  = String(row[txCol] || '').toLowerCase().trim();
         const ct  = String(row[ctCol] || '').toUpperCase().trim();
         const amt = parseAmt(row[amtCol]);
         if (!VALID_TX.includes(tx) || !ct) continue;
-        if (ct === 'KR') dom += amt; else forAmt += amt;
+        if (ct === 'KR') {
+          dom += amt;
+          const elig = eligCol ? String(row[eligCol] || '').trim().toLowerCase() : '';
+          if (elig === 'yes' || elig === 'y' || elig === 'true') dom15 += amt;
+          else dom30 += amt;
+        } else {
+          forAmt += amt;
+        }
       }
-      S.googleFiles.push({ name: file.name, dom, for: forAmt, err: null });
+      S.googleFiles.push({
+        name: file.name, dom, dom15, dom30, for: forAmt, err: null,
+        warn: eligCol ? null : '"First USD 1M Eligible" 컬럼 없음 — 전액 30%구간으로 처리됨',
+      });
     } catch (e) {
-      S.googleFiles.push({ name: file.name, dom: 0, for: 0, err: e.message });
+      S.googleFiles.push({ name: file.name, dom: 0, dom15: 0, dom30: 0, for: 0, err: e.message });
     }
   }
   renderGoogle();
@@ -711,7 +728,7 @@ function renderGoogle() {
          </div>`
       : `<div class="file-item">
            <div class="file-item-row1"><span class="fname" title="${item.name}">${item.name}</span><span class="fdel" onclick="delFile('google',${i})">✕</span></div>
-           <div class="file-item-row2">${monthBadge(item.name)}<span class="famount">국내 ${fmt(item.dom)} / 국외 ${fmt(item.for)}</span><span class="fbadge">✓</span></div>
+           <div class="file-item-row2">${monthBadge(item.name)}<span class="famount">국내 ${fmt(item.dom)} / 국외 ${fmt(item.for)}</span><span class="fbadge">✓</span>${item.warn ? `<span class="fbadge" style="background:#fef3c7;color:#92400e">⚠ ${item.warn}</span>` : ''}</div>
          </div>`,
     items => {
       const domSum = items.reduce((s, r) => s + r.dom, 0);
@@ -1038,11 +1055,15 @@ function renderTransfer() {
 // ── Monthly domestic data builder ────────────────────────────────────────────
 function buildMonthlyDomData(months) {
   const data = {};
-  months.forEach(m => { data[m] = { google: 0, apple: 0, transfer: 0, toss: 0 }; });
+  months.forEach(m => { data[m] = { google: 0, google15: 0, google30: 0, apple: 0, transfer: 0, toss: 0 }; });
 
   S.googleFiles.forEach(f => {
     const m = extractMonth(f.name);
-    if (m !== null && data[m] !== undefined) data[m].google += f.dom;
+    if (m !== null && data[m] !== undefined) {
+      data[m].google   += f.dom;
+      data[m].google15 += (f.dom15 || 0);
+      data[m].google30 += (f.dom30 || 0);
+    }
   });
   S.appleDomFiles.forEach(f => {
     const m = extractMonth(f.name);
@@ -1100,8 +1121,10 @@ function calculate() {
   }
 
   // Google
-  const googleDomTotal = S.googleFiles.reduce((s, r) => s + r.dom, 0);
-  const googleForTotal = S.googleFiles.reduce((s, r) => s + r.for, 0);
+  const googleDomTotal   = S.googleFiles.reduce((s, r) => s + r.dom, 0);
+  const googleDom15Total = S.googleFiles.reduce((s, r) => s + (r.dom15 || 0), 0);
+  const googleDom30Total = S.googleFiles.reduce((s, r) => s + (r.dom30 || 0), 0);
+  const googleForTotal   = S.googleFiles.reduce((s, r) => s + r.for, 0);
 
   // Apple domestic
   const appleDomTotal = S.appleDomFiles.reduce((s, r) => s + r.total, 0);
@@ -1119,7 +1142,7 @@ function calculate() {
 
   S.results = {
     year, quarter, months, exrates,
-    googleDomTotal, googleForTotal,
+    googleDomTotal, googleDom15Total, googleDom30Total, googleForTotal,
     appleDomTotal, appleForRows, appleForKRWTotal,
     tossCard: S.tossCard, tossCash: S.tossCash, tossOther: S.tossOther, tossTotal,
     transferTotal, totalForeign, totalDomestic, monthlyDom,
@@ -1192,9 +1215,9 @@ function calculate() {
     `<th${i > 0 ? ' class="right"' : ''} style="white-space:nowrap;min-width:${i===0?'90px':'80px'}">${h}</th>`
   ).join('');
 
-  function domRow(label, vals, totVal, style = '') {
-    const cells = vals.map(v => `<td class="right num">${fmt(v)}</td>`).join('');
-    return `<tr${style ? ` style="${style}"` : ''}><td>${label}</td>${cells}<td class="right num" style="font-weight:700">${fmt(totVal)}</td></tr>`;
+  function domRow(label, vals, totVal, style = '', fmtFn = fmt) {
+    const cells = vals.map(v => `<td class="right num">${fmtFn(v)}</td>`).join('');
+    return `<tr${style ? ` style="${style}"` : ''}><td>${label}</td>${cells}<td class="right num" style="font-weight:700">${fmtFn(totVal)}</td></tr>`;
   }
   function sectionHdr(label, cols) {
     return `<tr class="row-section"><td colspan="${cols}">${label}</td></tr>`;
@@ -1203,20 +1226,23 @@ function calculate() {
   const cols = months.length + 2; // 구분 + months + 합계
 
   // monthly values
-  const gMonthly  = months.map(m => monthlyDom[m].google);
-  const aMonthly  = months.map(m => monthlyDom[m].apple);
-  const trMonthly = months.map(m => monthlyDom[m].transfer);
-  const toMonthly = months.map(m => monthlyDom[m].toss);
+  const gMonthly   = months.map(m => monthlyDom[m].google);
+  const g15Monthly = months.map(m => monthlyDom[m].google15);
+  const g30Monthly = months.map(m => monthlyDom[m].google30);
+  const aMonthly   = months.map(m => monthlyDom[m].apple);
+  const trMonthly  = months.map(m => monthlyDom[m].transfer);
+  const toMonthly  = months.map(m => monthlyDom[m].toss);
 
   // subtotals per month
   const salesSubtotal = months.map((m, i) => gMonthly[i] + aMonthly[i] + trMonthly[i] + toMonthly[i]);
   const salesTotal    = googleDomTotal + appleDomTotal + transferTotal + tossTotal;
 
-  // fees = sales * 3/11 (google & apple only)
-  const gFeeMonthly = gMonthly.map(v => Math.round(v * 3 / 11));
+  // 구글 수수료: "First USD 1M Eligible" 구간별 정률 (15%/30%, 매출 원금액 기준)
+  // 애플 수수료: 구간 구분 없이 매출(부가세 포함) 기준 30% 근사치 = 매출 * 3/11
+  const gFeeMonthly = months.map((_, i) => Math.round(g15Monthly[i] * 0.15 + g30Monthly[i] * 0.30));
   const aFeeMonthly = aMonthly.map(v => Math.round(v * 3 / 11));
   const feeSub      = months.map((_, i) => gFeeMonthly[i] + aFeeMonthly[i]);
-  const gFeeTotal   = Math.round(googleDomTotal * 3 / 11);
+  const gFeeTotal   = Math.round(googleDom15Total * 0.15 + googleDom30Total * 0.30);
   const aFeeTotal   = Math.round(appleDomTotal  * 3 / 11);
   const feeTotalAll = gFeeTotal + aFeeTotal;
 
@@ -1238,6 +1264,12 @@ function calculate() {
   dHtml += domRow('계좌이체',    trMonthly, transferTotal);
   dHtml += domRow('토스페이먼츠', toMonthly, tossTotal);
   dHtml += domRow('합계', salesSubtotal, salesTotal, 'background:#f5f7ff;font-weight:700');
+
+  // 구글 수수료 구간별 매출 (부가세 계산용 보조표) — First USD 1M Eligible 기준 15%/30% 구간 분리
+  dHtml += sectionHdr('구글 수수료 구간별 매출 (부가세 계산용 보조표)', cols);
+  dHtml += domRow('15%구간 매출액', g15Monthly, googleDom15Total, '', fmtNonNeg);
+  dHtml += domRow('30%구간 매출액', g30Monthly, googleDom30Total, '', fmtNonNeg);
+  dHtml += domRow('실제 구글수수료', gFeeMonthly, gFeeTotal, 'background:#f5f7ff;font-weight:700');
 
   // Section 2: 수수료
   dHtml += sectionHdr('수수료', cols);
@@ -1281,6 +1313,17 @@ async function exportExcel() {
     const bdr  = { top: thin, left: thin, bottom: thin, right: thin };
     const wonFmt = '#,##0';
     const decFmt = '#,##0.00';
+    // 음수는 화면에만 0으로 표시(계산엔 실제 음수 값이 그대로 반영됨)
+    const wonFmtNonNeg = '#,##0;"0";0';
+
+    function colLetter(n) {
+      let s = '';
+      while (n > 0) { const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26); }
+      return s;
+    }
+    function nextRow(ws) { return ws.rowCount + 1; }
+    const mCols  = months.map((_, i) => colLetter(2 + i));
+    const totCol = colLetter(NC);
 
     const FILLS = {
       hdr:   { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4472C4' } },
@@ -1316,49 +1359,36 @@ async function exportExcel() {
       return row;
     }
 
-    // ── Sheet 1: 국외매출정리 ──
+    // ── Sheet 1 data: 국외매출 (raw values only — totals/derived cells become formulas) ──
     const gForByMon = {};
     months.forEach(m => { gForByMon[m] = 0; });
     S.googleFiles.forEach(f => {
       const m = extractMonth(f.name);
       if (m !== null && gForByMon[m] !== undefined) gForByMon[m] += f.for;
     });
-    const aForByMon = {}, exrByMon = {}, aRawByMon = {};
-    months.forEach(m => { aForByMon[m] = 0; exrByMon[m] = 0; aRawByMon[m] = 0; });
+    const exrByMon = {}, aRawByMon = {};
+    months.forEach(m => { exrByMon[m] = 0; aRawByMon[m] = 0; });
     r.appleForRows.forEach(af => {
       const m = af.month;
       if (months.includes(m)) {
-        aForByMon[m] += af.krw;
         exrByMon[m]   = af.exrate;
         aRawByMon[m] += af.raw;
       }
     });
-    const gForM  = months.map(m => gForByMon[m]);
-    const aForM  = months.map(m => aForByMon[m]);
-    const exrM   = months.map(m => exrByMon[m]);
-    const aRawM  = months.map(m => aRawByMon[m]);
-    const sumForM = months.map((_, i) => gForM[i] + aForM[i]);
+    const gForM = months.map(m => gForByMon[m]);
+    const exrM  = months.map(m => exrByMon[m]);
+    const aRawM = months.map(m => aRawByMon[m]);
 
-    // ── Sheet 1: 국내매출및실입금액내역 ──
+    // ── 국내매출및실입금액내역 데이터 (raw values only) ──
     const md   = r.monthlyDom;
     const gM   = months.map(m => md[m].google);
+    const g15M = months.map(m => md[m].google15);
+    const g30M = months.map(m => md[m].google30);
     const aM   = months.map(m => md[m].apple);
     const trM  = months.map(m => md[m].transfer);
     const toM  = months.map(m => md[m].toss);
 
-    const gFeeM = gM.map(v => Math.round(v * 3 / 11));
-    const aFeeM = aM.map(v => Math.round(v * 3 / 11));
-    const gFeeT = Math.round(r.googleDomTotal * 3 / 11);
-    const aFeeT = Math.round(r.appleDomTotal  * 3 / 11);
-    const gNetM = months.map((_, i) => gM[i] - gFeeM[i]);
-    const aNetM = months.map((_, i) => aM[i] - aFeeM[i]);
-
-    const saleSub  = months.map((_, i) => gM[i] + aM[i] + trM[i] + toM[i]);
-    const saleTotal = r.googleDomTotal + r.appleDomTotal + r.transferTotal + r.tossTotal;
-    const feeSub   = months.map((_, i) => gFeeM[i] + aFeeM[i]);
-    const feeTotal  = gFeeT + aFeeT;
-    const netSub   = months.map((_, i) => gNetM[i] + aNetM[i] + trM[i] + toM[i]);
-    const netTotal  = (r.googleDomTotal - gFeeT) + (r.appleDomTotal - aFeeT) + r.transferTotal + r.tossTotal;
+    const sumRowFormula = rn => ({ formula: `SUM(${mCols[0]}${rn}:${mCols[mCols.length - 1]}${rn})` });
 
     const ws1 = wb.addWorksheet('국내매출및실입금액내역');
     ws1.columns = [{ width: 14 }, ...months.map(() => ({ width: 18 })), { width: 18 }];
@@ -1376,46 +1406,141 @@ async function exportExcel() {
     row = ws1.addRow(['', ...mLabels, '합계']);
     styleRow(row, { fill: FILLS.hdr, bold: true, color: 'FFFFFFFF' });
 
-    // *매출
+    // *매출 — 원본 데이터 + 행 합계는 수식
     addSecHdr(ws1, '*매출');
-    row = ws1.addRow(['구글',        ...gM,      r.googleDomTotal]); styleRow(row, { numFmt: wonFmt });
-    row = ws1.addRow(['애플',        ...aM,      r.appleDomTotal]);  styleRow(row, { numFmt: wonFmt });
-    row = ws1.addRow(['계좌이체',    ...trM,     r.transferTotal]);  styleRow(row, { numFmt: wonFmt });
-    row = ws1.addRow(['토스페이먼츠', ...toM,    r.tossTotal]);      styleRow(row, { numFmt: wonFmt });
-    row = ws1.addRow(['합계',        ...saleSub, saleTotal]);        styleRow(row, { fill: FILLS.sub, bold: true, numFmt: wonFmt });
+    let rn = nextRow(ws1);
+    row = ws1.addRow(['구글', ...gM, sumRowFormula(rn)]);        styleRow(row, { numFmt: wonFmt });
+    const rGoogleSales = rn;
+    rn = nextRow(ws1);
+    row = ws1.addRow(['애플', ...aM, sumRowFormula(rn)]);        styleRow(row, { numFmt: wonFmt });
+    const rAppleSales = rn;
+    rn = nextRow(ws1);
+    row = ws1.addRow(['계좌이체', ...trM, sumRowFormula(rn)]);   styleRow(row, { numFmt: wonFmt });
+    const rTransferSales = rn;
+    rn = nextRow(ws1);
+    row = ws1.addRow(['토스페이먼츠', ...toM, sumRowFormula(rn)]); styleRow(row, { numFmt: wonFmt });
+    const rTossSales = rn;
+    rn = nextRow(ws1);
+    row = ws1.addRow(['합계',
+      ...mCols.map(col => ({ formula: `SUM(${col}${rGoogleSales}:${col}${rTossSales})` })),
+      sumRowFormula(rn),
+    ]);
+    styleRow(row, { fill: FILLS.sub, bold: true, numFmt: wonFmt });
     ws1.addRow([]);
 
-    // 수수료
+    // 구글 수수료 구간별 매출 (부가세 계산용 보조표) — First USD 1M Eligible 기준 15%/30% 구간 분리 데이터
+    addSecHdr(ws1, '구글 수수료 구간별 매출 (부가세 계산용 보조표)');
+    rn = nextRow(ws1);
+    row = ws1.addRow(['15%구간 매출액', ...g15M, sumRowFormula(rn)]); styleRow(row, { numFmt: wonFmtNonNeg });
+    const rGoogle15 = rn;
+    rn = nextRow(ws1);
+    row = ws1.addRow(['30%구간 매출액', ...g30M, sumRowFormula(rn)]); styleRow(row, { numFmt: wonFmtNonNeg });
+    const rGoogle30 = rn;
+    rn = nextRow(ws1);
+    row = ws1.addRow(['실제 구글수수료',
+      ...mCols.map(col => ({ formula: `ROUND(${col}${rGoogle15}*0.15+${col}${rGoogle30}*0.3,0)` })),
+      { formula: `ROUND(${totCol}${rGoogle15}*0.15+${totCol}${rGoogle30}*0.3,0)` },
+    ]);
+    styleRow(row, { fill: FILLS.sub, bold: true, numFmt: wonFmt });
+    const rGoogleActualFee = rn;
+    ws1.addRow([]);
+
+    // 수수료 — 구글은 위 보조표의 실제 수수료를 참조, 애플은 매출 × 3/11(반올림)
     addSecHdr(ws1, '수수료');
-    row = ws1.addRow(['구글', ...gFeeM, gFeeT]);    styleRow(row, { numFmt: wonFmt });
-    row = ws1.addRow(['애플', ...aFeeM, aFeeT]);    styleRow(row, { numFmt: wonFmt });
-    row = ws1.addRow(['합계', ...feeSub, feeTotal]); styleRow(row, { fill: FILLS.sub, bold: true, numFmt: wonFmt });
+    rn = nextRow(ws1);
+    row = ws1.addRow(['구글',
+      ...mCols.map(col => ({ formula: `${col}${rGoogleActualFee}` })),
+      { formula: `${totCol}${rGoogleActualFee}` },
+    ]);
+    styleRow(row, { numFmt: wonFmt });
+    const rGoogleFee = rn;
+    rn = nextRow(ws1);
+    row = ws1.addRow(['애플',
+      ...mCols.map(col => ({ formula: `ROUND(${col}${rAppleSales}*3/11,0)` })),
+      { formula: `ROUND(${totCol}${rAppleSales}*3/11,0)` },
+    ]);
+    styleRow(row, { numFmt: wonFmt });
+    const rAppleFee = rn;
+    rn = nextRow(ws1);
+    row = ws1.addRow(['합계',
+      ...mCols.map(col => ({ formula: `SUM(${col}${rGoogleFee}:${col}${rAppleFee})` })),
+      sumRowFormula(rn),
+    ]);
+    styleRow(row, { fill: FILLS.sub, bold: true, numFmt: wonFmt });
     ws1.addRow([]);
 
-    // 실입금액
+    // 실입금액 — 매출-수수료 참조, 계좌이체/토스는 매출 그대로 참조
     addSecHdr(ws1, '실입금액');
-    row = ws1.addRow(['구글',        ...gNetM, r.googleDomTotal - gFeeT]); styleRow(row, { numFmt: wonFmt });
-    row = ws1.addRow(['애플',        ...aNetM, r.appleDomTotal  - aFeeT]); styleRow(row, { numFmt: wonFmt });
-    row = ws1.addRow(['계좌이체',    ...trM,   r.transferTotal]);           styleRow(row, { numFmt: wonFmt });
-    row = ws1.addRow(['토스페이먼츠', ...toM,  r.tossTotal]);               styleRow(row, { numFmt: wonFmt });
-    row = ws1.addRow(['합계',        ...netSub, netTotal]);                 styleRow(row, { fill: FILLS.total, bold: true, numFmt: wonFmt });
+    rn = nextRow(ws1);
+    row = ws1.addRow(['구글',
+      ...mCols.map(col => ({ formula: `${col}${rGoogleSales}-${col}${rGoogleFee}` })),
+      { formula: `${totCol}${rGoogleSales}-${totCol}${rGoogleFee}` },
+    ]);
+    styleRow(row, { numFmt: wonFmt });
+    const rGoogleNet = rn;
+    rn = nextRow(ws1);
+    row = ws1.addRow(['애플',
+      ...mCols.map(col => ({ formula: `${col}${rAppleSales}-${col}${rAppleFee}` })),
+      { formula: `${totCol}${rAppleSales}-${totCol}${rAppleFee}` },
+    ]);
+    styleRow(row, { numFmt: wonFmt });
+    rn = nextRow(ws1);
+    row = ws1.addRow(['계좌이체',
+      ...mCols.map(col => ({ formula: `${col}${rTransferSales}` })),
+      { formula: `${totCol}${rTransferSales}` },
+    ]);
+    styleRow(row, { numFmt: wonFmt });
+    rn = nextRow(ws1);
+    row = ws1.addRow(['토스페이먼츠',
+      ...mCols.map(col => ({ formula: `${col}${rTossSales}` })),
+      { formula: `${totCol}${rTossSales}` },
+    ]);
+    styleRow(row, { numFmt: wonFmt });
+    const rNetFirst = rGoogleNet;
+    const rNetLast  = rn; // 토스(실입금액) 행 — 구글~토스가 연속 행이므로 SUM 범위로 사용
+    rn = nextRow(ws1);
+    row = ws1.addRow(['합계',
+      ...mCols.map(col => ({ formula: `SUM(${col}${rNetFirst}:${col}${rNetLast})` })),
+      sumRowFormula(rn),
+    ]);
+    styleRow(row, { fill: FILLS.total, bold: true, numFmt: wonFmt });
 
-    // ── Sheet 2: 국외매출정리 ──
+    // ── Sheet 2: 국외매출정리 (원금액·환율 → 원화환산은 수식) ──
     const ws2 = wb.addWorksheet('국외매출정리');
     ws2.columns = [{ width: 12 }, ...months.map(() => ({ width: 18 })), { width: 18 }];
 
     row = ws2.addRow(['국외매출', ...mLabels, '합계']);
     styleRow(row, { fill: FILLS.hdr, bold: true, color: 'FFFFFFFF' });
-    row = ws2.addRow(['구글', ...gForM, r.googleForTotal]);
+
+    let rn2 = nextRow(ws2);
+    row = ws2.addRow(['구글', ...gForM, sumRowFormula(rn2)]);
     styleRow(row, { numFmt: wonFmt });
-    row = ws2.addRow(['애플', ...aForM, r.appleForKRWTotal]);
-    styleRow(row, { numFmt: wonFmt });
-    row = ws2.addRow(['합계', ...sumForM, r.totalForeign]);
-    styleRow(row, { fill: FILLS.sub, bold: true, numFmt: wonFmt });
-    row = ws2.addRow(['평균환율', ...exrM, null]);
-    styleRow(row, { numFmt: decFmt });
-    row = ws2.addRow(['', ...aRawM, null]);
+    const rGoogleFor = rn2;
+
+    rn2 = nextRow(ws2);
+    row = ws2.addRow(['애플(USD)', ...aRawM]);
     styleRow(row, { numFmt: '#,##0.000000' });
+    const rAppleRaw = rn2;
+
+    rn2 = nextRow(ws2);
+    row = ws2.addRow(['평균환율', ...exrM]);
+    styleRow(row, { numFmt: decFmt });
+    const rExrate = rn2;
+
+    rn2 = nextRow(ws2);
+    row = ws2.addRow(['애플',
+      ...mCols.map(col => ({ formula: `ROUND(${col}${rAppleRaw}*${col}${rExrate},0)` })),
+      sumRowFormula(rn2),
+    ]);
+    styleRow(row, { numFmt: wonFmt });
+    const rAppleFor = rn2;
+
+    rn2 = nextRow(ws2);
+    row = ws2.addRow(['합계',
+      ...mCols.map(col => ({ formula: `${col}${rGoogleFor}+${col}${rAppleFor}` })),
+      { formula: `${totCol}${rGoogleFor}+${totCol}${rAppleFor}` },
+    ]);
+    styleRow(row, { fill: FILLS.sub, bold: true, numFmt: wonFmt });
 
     // ── Download ──
     const buffer = await wb.xlsx.writeBuffer();
